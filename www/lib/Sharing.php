@@ -144,6 +144,18 @@ ALTER TABLE releasecomment ADD shareid VARCHAR(40) NOT NULL DEFAULT '';
 
 class Sharing {
 	/**
+	 * Debug priority.
+	 * 0 - Turn it off.
+	 * 1 - Non Important stuff.
+	 * 2 - Important stuff.
+	 * 3 - Everything.
+	 *
+	 * @var int
+	 * @access private
+	 */
+	private $dpriority = 3;
+
+	/**
 	 * The group to store/retrieve the articles.
 	 *
 	 * @note Not set in stone.
@@ -184,18 +196,6 @@ class Sharing {
 	 * @access private
 	 */
 	private $debug;
-
-	/**
-	 * Debug priority.
-	 * 0 - Turn it off.
-	 * 1 - Non Important stuff.
-	 * 2 - Important stuff.
-	 * 3 - Everything.
-	 *
-	 * @var int
-	 * @access private
-	 */
-	private $dpriority = 3;
 
 	/**
 	 * Display general info to console?
@@ -249,14 +249,15 @@ class Sharing {
 	 * @access protected
 	 */
 	protected function initSite() {
-		if ($this->db->queryExec(
-			  'INSERT INTO sharing ('
-			. 'local, lastpushtime, firstuptime, oldestlocal, newestlocal, '
-			. 'p_comments, p_sname, p_cat_id, p_imdb, p_tvrage, '
-			. 'hideuser, autoenable)'
-			. 'VALUES (1, NULL, NOW(), NULL, NULL, '
-			. '0, 0, 0, 0, 0, '
-			. '0, 0)') !== false) {
+		$name = $this->db->escapeString(uniqid('nZEDb_', true));
+		if ($this->db->queryExec(sprintf(
+			"INSERT INTO sharing (
+			local, lastpushtime, firstuptime,
+			p_comments, p_sname, p_cat_id, p_imdb, p_tvrage,
+			hideuser, autoenable, real_name , local_name)
+			VALUES (1, NULL, NOW(),
+			0, 0, 0, 0, 0,
+			0, 0, %s, %s)", $name, $name)) !== false) {
 			return true;
 		} else {
 			return false;
@@ -274,7 +275,8 @@ class Sharing {
 	protected function matchComments() {
 		$ret = 0;
 
-		$res = $this->db->query("SELECT id FROM releases r INNER JOIN releasecomment rc ON rc.nzb_guid = r.nzb_guid WHERE rc.releaseid = NULL");
+		$res = $this->db->query("SELECT id FROM releases r INNER JOIN releasecomment
+			rc ON rc.nzb_guid = r.nzb_guid WHERE rc.releaseid = NULL");
 		if (count($res) > 0) {
 			foreach ($res as $row) {
 				if ($this->db->queryExec(sprintf(
@@ -334,7 +336,7 @@ class Sharing {
 	public function shareAll() {
 		$qty = array();
 
-		$settings = $db->queryOneRow("SELECT * FROM sharing WHERE local = 1");
+		$settings = $this->db->queryOneRow("SELECT * FROM sharing WHERE local = 1");
 		if ($settings === false) {
 
 			$initiated = $this->initSite();
@@ -346,7 +348,7 @@ class Sharing {
 			}
 		} else {
 			$new = false;
-			if ($settings['lastpushtime'] == 'NULL') {
+			if ($settings['lastpushtime'] == NULL) {
 				$new = true;
 			}
 			// Metadata
@@ -373,7 +375,7 @@ class Sharing {
 		$ret = 0;
 
 		$last = $this->db->queryOneRow(
-			"SELECT createdate AS d FROM releasecomments ORDER BY createdate LIMIT 1");
+			"SELECT createddate AS d FROM releasecomment ORDER BY createddate LIMIT 1");
 
 		if ($last === false) {
 			return $ret;
@@ -382,7 +384,7 @@ class Sharing {
 
 				$res = $this->db->query(sprintf(
 					  "SELECT rc.*, r.nzb_guid, FROM releasecomment rc INNER JOIN"
-					. " releases r ON r.id = rc.releaseid WHERE createdate > %s AND shared = 0"
+					. " releases r ON r.id = rc.releaseid WHERE createddate > %s AND shared = 0"
 					, $this->db->escapeString($last["d"])));
 
 				if (count($res) > 0) {
@@ -397,7 +399,7 @@ class Sharing {
 							} else {
 								$ret++;
 								// Update DB to say we uploaded the comment.
-								$this->db->queryExec("UPDATE releasecomments SET shared = 1");
+								$this->db->queryExec("UPDATE releasecomment SET shared = 1");
 							}
 						}
 					}
@@ -423,10 +425,10 @@ class Sharing {
 		$ret = 0;
 
 		$last = $this->db->queryOneRow(
-			'SELECT createdate AS d FROM releasecomments ORDER BY createdate DESC LIMIT 1');
+			'SELECT createddate AS d FROM releasecomment ORDER BY createddate DESC LIMIT 1');
 
 		if ($last === false) {
-			$this->debugEcho('Could not select createdate from releasecomments.',
+			$this->debugEcho('Could not select createddate from releasecomment.',
 				2, 'pushComments');
 			return $ret;
 		}
@@ -435,17 +437,17 @@ class Sharing {
 		if (!$new && $last['d'] > $settings['lastpushtime']) {
 
 			$res = $this->db->query(sprintf(
-				"SELECT rc.*, r.nzb_guid, u.username, FROM releasecomment rc
+				"SELECT rc.*, r.nzb_guid, u.username FROM releasecomment rc
 				INNER JOIN releases r ON r.id = rc.releaseid
-				INNER JOIN users u ON rc.userid = u.id
-				WHERE r.createdate > %s AND rc.shared = 0"
+				INNER JOIN users u ON u.id = rc.userid 
+				WHERE rc.createddate > %s AND rc.shared = 0"
 				, $this->db->escapeString($last['d'])));
 		} else {
 			$res = $this->db->query(sprintf(
-				"SELECT rc.*, r.nzb_guid, u.username, FROM releasecomment rc
-				INNER JOIN releases r ON r.id = rc.releaseid
-				INNER JOIN users u ON rc.userid = u.id
-				WHERE r.createdate > %s AND rc.shared = 0"
+				"SELECT rc.*, r.nzb_guid, u.username FROM releasecomment rc 
+				INNER JOIN releases r ON r.id = rc.releaseid 
+				INNER JOIN users u ON u.id = rc.userid 
+				WHERE rc.createddate > %s AND rc.shared = 0"
 				, $this->db->escapeString($settings['firstuptime'])));
 		}
 
@@ -455,56 +457,19 @@ class Sharing {
 				if ($body === false) {
 					continue;
 				} else {
-					if ($this->pushArticle($body, $row) === false) {
+					if ($this->pushArticle($body, $row, 'c') === false) {
 						continue;
 					} else {
 						$ret++;
 						// Update DB to say we uploaded the comment.
 						$this->db->queryExec(sprintf(
-							'UPDATE releasecomments SET shared = 1 WHERE releaseid = %d',
+							'UPDATE releasecomment SET shared = 1 WHERE releaseid = %d',
 							$row['releaseid']));
 					}
 				}
 			}
 		}
 		return $ret;
-	}
-
-	// gzip then yEnc encode the body, set up the subject then attempt to upload the comment.
-	/**
-	 * GZIP an article body, then yEnc encode it, set up a subject, finally
-	 * upload the comment.
-	 *
-	 * @param string $body The message to gzip/yEncode.
-	 * @param array  $row  The comment/release info.
-	 *
-	 * @return bool  Have we uploaded the article?
-	 *
-	 * @access protected
-	 */
-	protected function pushArticle($body, $row) {
-		$yenc = new Yenc;
-		$nntp = new NNTP();
-		$nntp->doConnect();
-
-		$success =
-			$nntp->post(
-				// Group(s)
-				self::group,
-				// Subject
-				$row['nzb_guid'] . ' - [1/1] "' . time() . '" (1/1) yEnc',
-				// Body
-				$yenc->encode(gzdeflate($body, 4), uniqid),
-				// Poster
-				"nZEDb");
-
-		$nntp->doQuit();
-
-		if ($success == false) {
-			return false;
-		} else {
-			return true;
-		}
 	}
 
 	/**
@@ -522,6 +487,7 @@ class Sharing {
 		/* Example message for a comment:
 		{
 			"SITE": "nZEDb.521d7818435830.65093125",
+			"NAME": "john's indexer",
 			"GUID": "13781e319b79b1a19fec5ef4a931b163",
 			"TIME": "1334663234",
 			"COMMENT": "example",
@@ -530,32 +496,19 @@ class Sharing {
 			*CSHAREID: "bcd5a37c022525b62956e6975127f8c12a0bd4b5"
 		}*/
 
-		//$site = $settings["name"];
-		$site = 'nZEDb.521d7818435830.65093125';
-
-		//$guid = $row['nzb_guid'];
-		$guid = '13781e319b79b1a19fec5ef4a931b163';
-
 		$type = '';
 		$body = array();
 		if ($comment) {
 			$type = 'COMMENT';
-			$body = 'Testing uploading comments to usenet.';
-			//$body = $row['text'];
+			$body = $row['text'];
 		} else {
 			$type = 'META';
 			$body = array(
-				'IMDB'   => 'tt3337194',
-				'TVRAGE' => '34726',
-				'CATID'  => '8050',
-				'SNAME'  => 'Test'
-				);
-			/*$body = array(
 				'IMDB'   => (
-					($settings['p_imdb'] == '1' && $row['imdbid'] != 'NULL')
+					($settings['p_imdb'] == '1' && $row['imdbid'] != NULL)
 					? $row['imdbid'] : 'NULL'),
 				'TVRAGE' => (
-					($settings['p_tvrage'] == '1' && $row['rageid'] != 'NULL')
+					($settings['p_tvrage'] == '1' && $row['rageid'] != NULL)
 					? $row['rageid'] : 'NULL'),
 				'CATID'  => (
 					($settings['p_catid'] == '1' && $row['categoryid'] != '7010')
@@ -563,32 +516,62 @@ class Sharing {
 				'SNAME'  => (
 					($settings['p_tvrage'] == '1' && $row['searchname') ! = '')
 					? $row['searchname'] : 'NULL')
-				);*/
+				);
 		}
-
-		/*
-		if ($this->hideuser)
-			$cuser = "Anonymous User";
-		else
-			$cuser = $row["username"];*/
-		$cuser = "John Doe";
-
-		//$cdate = $db->unix_timestamp($row["createdate"]);
-		$cdate = "1377797670";
-
-		//$cshareid = sha1($comment.$guid);
-		$cshareid = "a30c7201057fb208a1653f91c05d172bbfc096f1";
 
 		return json_encode(
 				array(
-					'SITE'     => $site,
-					'GUID'     => $guid,
+					'SITE'     => $settings['real_name'],
+					'NAME'     => $settings ['local_name'],
+					'GUID'     => $row['nzb_guid'],
 					'TIME'     => time(),
 					$type      => $body,
-					'CUSER'    => $cuser,
-					'CDATE'    => $cdate,
-					'CSHAREID' => $cshareid
+					'CUSER'    => ($this->hideuser) ? "Anonymous" : $row["username"],
+					'CDATE'    => $this->db->unix_timestamp($row["createddate"]),
+					'CSHAREID' => $cshareid = sha1($comment.$row['nzb_guid'])
 					));
+	}
+
+	/**
+	 * GZIP an article body, then yEnc encode it, set up a subject, finally
+	 * upload the comment.
+	 *
+	 * @param string $body The message to gzip/yEncode.
+	 * @param array  $row  The comment/release info.
+	 * @param string $type c for comment m for meta.
+	 *
+	 * @return bool  Have we uploaded the article?
+	 *
+	 * @access protected
+	 */
+	protected function pushArticle($body, $row, $type) {
+		$yenc = new Yenc;
+		
+		$nntp = new NNTP();
+		$nntp->doConnect();
+
+		// Example subject (not set in stone) :
+		// c_13781e319b79b1a19fec5ef4a931b163 - [1/1] "1334663234" (1/1) yEnc
+
+		$success =
+			$nntp->mail(
+				// Group(s)
+				self::group,
+				// Subject
+				$type . '_' . $row['nzb_guid'] . ' - [1/1] "' . time() . '" (1/1) yEnc',
+				// Body
+				$yenc->encode(gzdeflate($body, 4), uniqid('', true)),
+				// From
+				'From: <anon@anon.com>'
+				);
+
+		$nntp->doQuit();
+
+		if ($success == false) {
+			return false;
+		} else {
+			return true;
+		}
 	}
 
 	/**
@@ -636,7 +619,7 @@ class Sharing {
 					WHERE shareid = %s", $m["CSHAREID"]));
 					if ($check === false) {
 						$i = $db->queryExec(sprintf("INSERT INTO releasecomment
-							(text, username, createdate, shareid, nzb_guid, site)
+							(text, username, createddate, shareid, nzb_guid, site)
 							VALUES (%s, %s, %s, %s, %s, %s)",
 							$db->escapeString($m["BODY"]),
 							$db->escapeString($m["CUSER"]),
@@ -818,10 +801,11 @@ class Sharing {
 	 * @access protected
 	 */
 	protected function debugEcho($string, $priority, $function) {
-		if (!$this->debug || ($this->dpriority < $priority)) {
+		if (!$this->debug || ($this->dpriority < $priority ||
+			$this->dpriority > 3 || $this->dpriority < 0)) {
 			return;
 		} else {
-			$message = 'DEBUG: nZEDb.Sharing.' . $function . '() [' . $string . ']\n';
+			$message = 'DEBUG: nZEDb.Sharing.' . $function . '() [' . $string . "]\n";
 			if ($this->dpriority === 3) {
 				echo $message;
 			} else if ($this->dpriority === 2 && $priority === 2) {
