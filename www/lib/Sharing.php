@@ -4,28 +4,19 @@ define('CUR_PATH', realpath(dirname(__FILE__)));
  /**
   * @TODO:
   *
-  * Create sharing table.
-  *         see function initSite()
+  * Create patches for comments table and sharing table
   *
-  * Create column shared in releasecomments.
-  *         shared = wether we shared the comment previously.
-  * Create column shareid in releasecomments.
-  *         shareid = sha1 hash of comment+guid
-  * Create column username in releasecomments.
-  *         username = the name of the user who posted the comment
-  * Create column nzb_guid in releasecomments.
-  *         nzb_guid = the md5 hash of the first message-id in a nzb file
+  * Edit the schemas.
   *
-  * Add site settings to DB.
-  *         something to toggle on and off the whole sharing system.
-  *         option to hide usernames
-  *         option to auto enable sites
+  * Create a webpage in the admin section to administer everything.
   *
   * Add a backfill function.
   *
   * Fetch and post Metadata (imdbid / searchname / etc.)
   *
   * Encryption of body.
+  *
+  * Limit download / upload per run.
   */
 
  /**
@@ -38,8 +29,10 @@ define('CUR_PATH', realpath(dirname(__FILE__)));
   * LOCAL
   * lastpushtime = last time we posted metadata
   * firstuptime  = How far back should we upload metadata/comments the first time?
-  * oldestlocal  = Oldest metadata we have locally posted.
-  * newestlocal  = Newest metadata we have locally posted.
+  * omlocal      = Oldest metadata we have locally posted (release id).
+  * nmlocal      = Newest metadata we have locally posted (release id).
+  * oclocal      = Oldest comment we have locally posted (comment id).
+  * nclocal      = Newest comment we have locally posted (comment id).
   * autoenable   = Should we auto enable new sites?
   * hideuser     = Should we hide usernames when posting comments to usenet?
   * override_p   = Turn off all posting.
@@ -47,14 +40,11 @@ define('CUR_PATH', realpath(dirname(__FILE__)));
   *
   * NON LOCAL :
   * updatetime   = last time a site was updated
-  * backfill     = our current backfill target
   * status       = wether the non local site is enabled or not
   * lastseen     = last time we have seen the non local site
   * firstseen    = the first time we have seen the non local site
-  * lasthash     = the hash of the last article -> contained in the subject
   * lastarticle  = our newest fetched article #
   * lastdate     = the unixtime of the last article -> contained in the subject
-  * firsthash    = the hash of the oldest article
   * firstarticle = our oldest fetched article #
   * firstdate    = the unixtime of the first article
   * real_name    = The name of the site, as sent by the site.
@@ -65,6 +55,9 @@ define('CUR_PATH', realpath(dirname(__FILE__)));
   * comments     = how many comments the non local site has
   * f_comments   = 1 = enable fetching comments (change this to a site setting ?) 0 disabled
   * p_comments   = post comments (also change this to a site setting?)
+  * backfill_c   = our current backfill target (article number)
+  * lasthash_c   = the hash of the last article -> contained in the subject
+  * firsthash_c  = the hash of the oldest article
   *
   * METADATA :
   * f_sname      = Should we download this sites searchnames?
@@ -75,7 +68,73 @@ define('CUR_PATH', realpath(dirname(__FILE__)));
   * p_imdb       = Should we upload our IMDB id's?
   * f_tvrage     = Should we download tvrage id's from this site?
   * p_tvrage     = Should we upload our tvrage id's?
+  * backfill_m   = our current backfill target (article number)
+  * lasthash_m   = the hash of the last article -> contained in the subject
+  * firsthash_m  = the hash of the oldest article
   */
+
+ /**
+  * MySQL schema:
+  *
+
+DROP TABLE IF EXISTS sharing;
+CREATE TABLE sharing (
+	id    INT(11) UNSIGNED NOT NULL AUTO_INCREMENT,
+	local TINYINT UNSIGNED NOT NULL DEFAULT '0',
+
+	lastpushtime DATETIME DEFAULT NULL,
+	firstuptime  DATETIME DEFAULT NULL,
+	omlocal      INT(11) UNSIGNED NOT NULL DEFAULT '0',
+	nmlocal      INT(11) UNSIGNED NOT NULL DEFAULT '0',
+	oclocal      INT(11) UNSIGNED NOT NULL DEFAULT '0',
+	nclocal      INT(11) UNSIGNED NOT NULL DEFAULT '0',
+	autoenable   TINYINT(1) NOT NULL DEFAULT '0',
+	hideuser     TINYINT(1) NOT NULL DEFAULT '0',
+	override_p   TINYINT(1) NOT NULL DEFAULT '0',
+	override_f   TINYINT(1) NOT NULL DEFAULT '0',
+
+	updatetime   DATETIME DEFAULT NULL,
+	status       TINYINT(1) NOT NULL DEFAULT '0',
+	lastseen     DATETIME DEFAULT NULL,
+	firstseen    DATETIME DEFAULT NULL,
+	lastarticle  INT(11) UNSIGNED NOT NULL DEFAULT '0',
+	lastdate     DATETIME DEFAULT NULL,
+	firstarticle INT(11) UNSIGNED NOT NULL DEFAULT '0',
+	firstdate    DATETIME DEFAULT NULL,
+	real_name    VARCHAR(255) NOT NULL DEFAULT '',
+	local_name   VARCHAR(255) NOT NULL DEFAULT '',
+	notes        VARCHAR(255) NOT NULL DEFAULT '',
+
+	comments     INT(11) UNSIGNED NOT NULL DEFAULT '0',
+	f_comments   TINYINT(1) NOT NULL DEFAULT '0',
+	p_comments   TINYINT(1) NOT NULL DEFAULT '0',
+	backfill_c   INT(11) UNSIGNED NOT NULL DEFAULT '0',
+	lasthash_c   VARCHAR(40) NOT NULL DEFAULT '',
+	firsthash_c  VARCHAR(40) NOT NULL DEFAULT '',
+
+	f_sname      TINYINT(1) NOT NULL DEFAULT '0',
+	p_sname      TINYINT(1) NOT NULL DEFAULT '0',
+	f_cat_id     TINYINT(1) NOT NULL DEFAULT '0',
+	p_cat_id     TINYINT(1) NOT NULL DEFAULT '0',
+	f_imdb       TINYINT(1) NOT NULL DEFAULT '0',
+	p_imdb       TINYINT(1) NOT NULL DEFAULT '0',
+	f_tvrage     TINYINT(1) NOT NULL DEFAULT '0',
+	p_tvrage     TINYINT(1) NOT NULL DEFAULT '0',
+	backfill_m   INT(11) UNSIGNED NOT NULL DEFAULT '0',
+	lasthash_m   VARCHAR(40) NOT NULL DEFAULT '',
+	firsthash_m  VARCHAR(40) NOT NULL DEFAULT '',
+	PRIMARY KEY  (id)
+) ENGINE=MYISAM DEFAULT CHARACTER SET utf8 COLLATE utf8_unicode_ci AUTO_INCREMENT=1 ;
+
+ */
+
+ /**
+  * Alterations to the comment table:
+
+ALTER TABLE releasecomment ADD shared TINYINT(1) NOT NULL DEFAULT '0';
+ALTER TABLE releasecomment ADD shareid VARCHAR(40) NOT NULL DEFAULT '';
+
+ */
 
  /**
   * Class for sharing various atributes of a release to other nZEDb sites.
@@ -367,10 +426,8 @@ class Sharing {
 			'SELECT createdate AS d FROM releasecomments ORDER BY createdate DESC LIMIT 1');
 
 		if ($last === false) {
-			$this->debugEcho(''
-			if ($this->debug) {
-				echo "DEBUG: nZEDB.Sharing.pushComments() [Could not select createdate from releasecomments.]\n";
-			}
+			$this->debugEcho('Could not select createdate from releasecomments.',
+				2, 'pushComments');
 			return $ret;
 		}
 
@@ -378,13 +435,17 @@ class Sharing {
 		if (!$new && $last['d'] > $settings['lastpushtime']) {
 
 			$res = $this->db->query(sprintf(
-				  'SELECT rc.*, r.nzb_guid, FROM releasecomment rc INNER JOIN'
-				. " releases r ON r.id = rc.releaseid WHERE createdate > %s AND shared = 0"
+				"SELECT rc.*, r.nzb_guid, u.username, FROM releasecomment rc
+				INNER JOIN releases r ON r.id = rc.releaseid
+				INNER JOIN users u ON rc.userid = u.id
+				WHERE r.createdate > %s AND rc.shared = 0"
 				, $this->db->escapeString($last['d'])));
 		} else {
 			$res = $this->db->query(sprintf(
-				  'SELECT rc.*, r.nzb_guid, FROM releasecomment rc INNER JOIN'
-				. " releases r ON r.id = rc.releaseid WHERE createdate > %s AND shared = 0"
+				"SELECT rc.*, r.nzb_guid, u.username, FROM releasecomment rc
+				INNER JOIN releases r ON r.id = rc.releaseid
+				INNER JOIN users u ON rc.userid = u.id
+				WHERE r.createdate > %s AND rc.shared = 0"
 				, $this->db->escapeString($settings['firstuptime'])));
 		}
 
@@ -530,9 +591,14 @@ class Sharing {
 					));
 	}
 
-	// Decode a downloaded message and insert it.
 	/**
+	 * Decodes an article body and inserts the content into the DB.
 	 *
+	 * @param string $body The body to decode.
+	 *
+	 * @return bool Did we decode and insert it?
+	 *
+	 * @access protected
 	 */
 	protected function decodeBody($body) {
 		$message = gzinflate($body);
